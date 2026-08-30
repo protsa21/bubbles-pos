@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bubbles POS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f4f0; padding: 16px; }
+    .header { background: #2e7d32; color: white; padding: 16px; border-radius: 10px; text-align: center; margin-bottom: 16px; }
+    .header h1 { font-size: 24px; }
+    .header p { font-size: 12px; opacity: 0.85; margin-top: 4px; }
+    .card { background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card h3 { color: #2e7d32; margin-bottom: 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #e8f5e9; color: #2e7d32; padding: 8px; font-size: 13px; text-align: left; }
+    td { padding: 8px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+    input[type="number"] { width: 75px; padding: 6px; border: 1px solid #ddd; border-radius: 6px; text-align: center; font-size: 14px; }
+    input[type="number"]:focus { outline: none; border-color: #2e7d32; }
+    .fruit-name { font-weight: bold; color: #333; }
+    .badge { background: #e8f5e9; color: #2e7d32; padding: 4px 10px; border-radius: 20px; font-size: 12px; }
+    .summary-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 15px; }
+    .summary-row:last-child { border: none; font-weight: bold; font-size: 17px; color: #2e7d32; }
+    .discount-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+    .discount-row label { font-size: 14px; color: #555; }
+    .discount-row input { width: 100px; padding: 6px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+    .btn-finish { width: 100%; padding: 16px; background: #2e7d32; color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; letter-spacing: 1px; }
+    .btn-finish:hover { background: #1b5e20; }
+    .btn-finish:disabled { background: #aaa; cursor: not-allowed; }
+    #txn-id { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    #status-msg { text-align: center; padding: 10px; font-size: 14px; min-height: 24px; }
+    .ok  { color: #2e7d32; }
+    .err { color: #c62828; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🍎 Bubbles Fruit Shop</h1>
+  <p>Dhaka University</p>
+  <p id="txn-id"></p>
+</div>
+
+<div class="card">
+  <h3>Items</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Fruit</th>
+        <th>Unit Price (Tk)</th>
+        <th>Qty</th>
+        <th>Subtotal</th>
+      </tr>
+    </thead>
+    <tbody id="product-table"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Summary</h3>
+  <div class="summary-row">
+    <span>Subtotal</span>
+    <span id="subtotal-display">Tk 0.00</span>
+  </div>
+  <div class="discount-row">
+    <label>Discount (Tk)</label>
+    <input type="number" id="discount-input" min="0" value="0" oninput="updateSummary()">
+  </div>
+  <div class="summary-row">
+    <span>💰 Total Payable</span>
+    <span id="total-display">Tk 0.00</span>
+  </div>
+</div>
+
+<div id="status-msg"></div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <button class="btn-finish" id="finish-btn" onclick="finishSale()">
+    ✅ FINISH &amp; PRINT INVOICE
+  </button>
+</div>
+
+<script>
+  // ── APPS SCRIPT URL ──────────────────────────────────────
+  var SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwhe5S9BUjTV2TARa6IGD0jRAVpAIm1bPXjBhSBElxaGmaMLIHvIHg_vjzbRcZyeH3P/exec';
+
+  var products = [
+    { name: 'Apple',     emoji: '🍎', price: 20 },
+    { name: 'Orange',    emoji: '🍊', price: 12 },
+    { name: 'Pineapple', emoji: '🍍', price: 60 },
+    { name: 'Mango',     emoji: '🥭', price: 40 }
+  ];
+
+  function pad(n) { return n < 10 ? '0' + n : n; }
+
+  function generateTxnId() {
+    var d = new Date();
+    return 'TXN-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  }
+
+  var currentTxnId = generateTxnId();
+
+  function buildTable() {
+    var tbody = document.getElementById('product-table');
+    tbody.innerHTML = '';
+    products.forEach(function(p, i) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><span class="fruit-name">' + p.emoji + ' ' + p.name + '</span></td>' +
+        '<td><input type="number" id="price_' + i + '" value="' + p.price + '" min="0" step="0.01" oninput="updateSummary()"></td>' +
+        '<td><input type="number" id="qty_' + i + '" value="0" min="0" oninput="updateSummary()"></td>' +
+        '<td><span class="badge" id="sub_' + i + '">Tk 0.00</span></td>';
+      tbody.appendChild(tr);
+    });
+    updateSummary();
+  }
+
+  function updateSummary() {
+    var subtotal = 0;
+    products.forEach(function(p, i) {
+      var price = parseFloat(document.getElementById('price_' + i).value) || 0;
+      var qty   = parseFloat(document.getElementById('qty_' + i).value)   || 0;
+      var sub   = price * qty;
+      document.getElementById('sub_' + i).textContent = 'Tk ' + sub.toFixed(2);
+      subtotal += sub;
+    });
+    var discount = parseFloat(document.getElementById('discount-input').value) || 0;
+    var total    = Math.max(0, subtotal - discount);
+    document.getElementById('subtotal-display').textContent = 'Tk ' + subtotal.toFixed(2);
+    document.getElementById('total-display').textContent    = 'Tk ' + total.toFixed(2);
+  }
+
+  function setStatus(msg, type) {
+    var el = document.getElementById('status-msg');
+    el.textContent = msg;
+    el.className = type || '';
+  }
+
+  function finishSale() {
+    var saleItems = [];
+    products.forEach(function(p, i) {
+      var price = parseFloat(document.getElementById('price_' + i).value) || 0;
+      var qty   = parseFloat(document.getElementById('qty_' + i).value)   || 0;
+      if (qty > 0) saleItems.push({ name: p.name, qty: qty, price: price, subtotal: price * qty });
+    });
+
+    if (saleItems.length === 0) {
+      setStatus('⚠️ Please add at least one item.', 'err');
+      return;
+    }
+
+    var discount = parseFloat(document.getElementById('discount-input').value) || 0;
+    var subtotal = saleItems.reduce(function(s, i) { return s + i.subtotal; }, 0);
+    var total    = Math.max(0, subtotal - discount);
+
+    document.getElementById('finish-btn').disabled = true;
+    setStatus('⏳ Saving to Google Sheet...', '');
+
+    // Build GET URL with all parameters
+    var url = SCRIPT_URL
+      + '?txnId='    + encodeURIComponent(currentTxnId)
+      + '&items='    + encodeURIComponent(JSON.stringify(saleItems))
+      + '&discount=' + encodeURIComponent(discount)
+      + '&total='    + encodeURIComponent(total);
+
+    // JSONP trick — works cross-origin with zero CORS issues
+    var callbackName = 'cb_' + Date.now();
+    var script = document.createElement('script');
+
+    window[callbackName] = function(result) {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      if (result && result.status === 'ok') {
+        setStatus('✅ Saved to Google Sheet!', 'ok');
+        printInvoice(saleItems, subtotal, discount, total, result.dateStr, result.timeStr);
+        setTimeout(resetForm, 2000);
+      } else {
+        setStatus('❌ Save failed. Please try again.', 'err');
+        document.getElementById('finish-btn').disabled = false;
+      }
+    };
+
+    script.onerror = function() {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      setStatus('❌ Connection error. Check your internet.', 'err');
+      document.getElementById('finish-btn').disabled = false;
+    };
+
+    script.src = url + '&callback=' + callbackName;
+    document.body.appendChild(script);
+  }
+
+  function printInvoice(items, subtotal, discount, total, dateStr, timeStr) {
+    var rows = items.map(function(item) {
+      return '<tr>' +
+        '<td style="padding:7px;border-bottom:1px solid #eee">' + item.name + '</td>' +
+        '<td style="padding:7px;border-bottom:1px solid #eee;text-align:center">' + item.qty + '</td>' +
+        '<td style="padding:7px;border-bottom:1px solid #eee;text-align:right">Tk ' + item.price.toFixed(2) + '</td>' +
+        '<td style="padding:7px;border-bottom:1px solid #eee;text-align:right">Tk ' + item.subtotal.toFixed(2) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var html =
+      '<html><head><title>Invoice - ' + currentTxnId + '</title>' +
+      '<style>' +
+      'body{font-family:Arial,sans-serif;padding:30px;max-width:420px;margin:auto;color:#222}' +
+      'h1{color:#2e7d32;text-align:center;margin-bottom:4px}' +
+      'p{text-align:center;font-size:12px;color:#777;margin:2px 0}' +
+      'hr{border:none;border-top:1px solid #ddd;margin:12px 0}' +
+      'table{width:100%;border-collapse:collapse;font-size:13px}' +
+      'th{background:#e8f5e9;color:#2e7d32;padding:7px;text-align:left}' +
+      '.meta{font-size:12px;color:#888;margin:4px 0}' +
+      '.footer{text-align:center;font-size:11px;color:#bbb;margin-top:20px}' +
+      '</style></head><body>' +
+      '<h1>🍎 Bubbles Fruit Shop</h1>' +
+      '<p>Dhaka University</p>' +
+      '<p>Thank you for your purchase!</p>' +
+      '<hr>' +
+      '<p class="meta"><strong>Invoice #:</strong> ' + currentTxnId + '</p>' +
+      '<p class="meta"><strong>Date:</strong> ' + dateStr + ' &nbsp; <strong>Time:</strong> ' + timeStr + '</p>' +
+      '<hr>' +
+      '<table><thead><tr>' +
+      '<th>Item</th>' +
+      '<th style="text-align:center">Qty</th>' +
+      '<th style="text-align:right">Price</th>' +
+      '<th style="text-align:right">Total</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<hr>' +
+      '<table style="font-size:14px">' +
+      '<tr><td style="padding:5px">Subtotal</td><td style="padding:5px;text-align:right">Tk ' + subtotal.toFixed(2) + '</td></tr>' +
+      '<tr><td style="padding:5px">Discount</td><td style="padding:5px;text-align:right">- Tk ' + discount.toFixed(2) + '</td></tr>' +
+      '<tr style="font-weight:bold;color:#2e7d32;font-size:16px">' +
+      '<td style="padding:5px">TOTAL PAYABLE</td>' +
+      '<td style="padding:5px;text-align:right">Tk ' + total.toFixed(2) + '</td>' +
+      '</tr></table>' +
+      '<hr>' +
+      '<p class="footer">Powered by Bubbles POS &bull; Dhaka University</p>' +
+      '<script>window.onload=function(){window.print()}<\/script>' +
+      '</body></html>';
+
+    var w = window.open('', '_blank', 'width=520,height=720');
+    w.document.write(html);
+    w.document.close();
+  }
+
+  function resetForm() {
+    currentTxnId = generateTxnId();
+    document.getElementById('txn-id').textContent = currentTxnId;
+    document.getElementById('discount-input').value = 0;
+    products.forEach(function(p, i) {
+      document.getElementById('qty_' + i).value = 0;
+    });
+    updateSummary();
+    document.getElementById('finish-btn').disabled = false;
+    setStatus('', '');
+  }
+
+  // Init
+  buildTable();
+  document.getElementById('txn-id').textContent = currentTxnId;
+</script>
+</body>
+</html>
